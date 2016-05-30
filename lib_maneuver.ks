@@ -32,33 +32,57 @@ FUNCTION anomaly_at_radius {
 	RETURN ARCCOS((((orb:semimajoraxis*(1-orb:eccentricity^2))/radius) - 1)/orb:eccentricity).
 }
 
-// Returns -obt:inclination if we're on the DN side of the orbit.
+// Returns time to next LAN.
 
 
-// Changes inclination.  Math is currently only correct if executed at LAN/DAN.
-FUNCTION mvr_inclination {
-	PARAMETER t.  // Maneuver time.
-	PARAMETER target_inc.
-	PARAMETER ship IS ship.  // Can be any orbital.
+// MJ port.
+FUNCTION clamp360 { PARAMETER v. RETURN mod(v+360,360). }
+FUNCTION clamp180 { PARAMETER v. RETURN mod(v+540,360)-180. }
 	
-	LOCAL b IS basis_from_ship(ship, t).
-	LOCAL vel IS VELOCITYAT(ship, t):orbit.
-	LOCAL obt IS ORBITAT(ship, t).
-	LOCAL mvr IS basis_transform(b, (vel + angleaxis(obt:inclination - target_inc, b[2]))-vel).
-	RETURN NODE(t:seconds, mvr:z, mvr:y, mvr:x).
+FUNCTION heading_for_inclination {
+	PARAMETER inc.	// Target inclination.
+	PARAMETER lat.	// Latitude; arcsin(pos:y/pos:mag)
+	LOCAL costarget IS 2.
+	IF Clamp360(lat)<>90 { SET costarget TO COS(inc)/COS(lat). }
+	IF ABS(costarget) > 1 {
+		// Impossible inclination at this latitude.
+		IF abs(Clamp180(inc)) < 90 {
+			RETURN 90.
+		}
+		RETURN 270.
+	}
+	LOCAL hdg IS arccos(costarget).
+	IF inc<0 { SET hdg TO -hdg. }
+	RETURN Clamp360(90 - hdg).	// 360+90-...
 }
 
-REMOVE n.
-WAIT 0.
-LOCAL n IS mvr_inclination(time+eta:apoapsis, 15).
-PRINT n.
-ADD n.
+// Changes inclination.
+FUNCTION mvr_inclination {
+	PARAMETER t.  // Maneuver time.
+	PARAMETER inc.  // Target inclination
+	PARAMETER ship IS ship.  // Can be any orbital.
 
-REMOVE n.
-WAIT 0.
-LOCAL n IS mvr_inclination(time, 0).
-PRINT n.
-ADD n.
-PRINT MOD(obt:argumentofperiapsis + obt:trueanomaly, 360).
-
-
+	LOCAL vel IS VELOCITYAT(ship, t):orbit.
+	LOCAL obt IS ORBITAT(ship, t).
+	LOCAL r IS POSITIONAT(ship, t) - POSITIONAT(obt:body, t).
+	LOCAL b IS basis_une(vel, r).
+	LOCAL hdg IS heading_for_inclination(inc, ARCSIN(r:y/r:mag)).
+	LOCAL hvel IS VXCL(b[0], vel).	// actualHorizontalVelocity.
+	// LOCAL hvel IS vel.
+	LOCAL n IS b[1]*hvel:mag*cos(hdg).	// North component
+	LOCAL e IS b[2]*hvel:mag*sin(hdg). // eastComponent
+	LOCAL lvel IS basis_transform(b, vel).
+	LOCAL hvel IS V(0,lvel:y,lvel:z).
+	LOCAL tvel IS V(lvel:x,hvel:mag*cos(hdg),hvel:mag*sin(hdg)).
+	IF (vel:y<0)=(Clamp180(inc)>0) {
+		SET tvel:y TO -tvel:y.
+	}
+	LOCAL mvr IS basis_transform(basis_for_ship(ship, t), basis_transform(b, tvel-lvel, true)).
+	RETURN NODE(t:seconds, mvr:x, mvr:y, mvr:z).
+	
+	LOCAL b IS basis_for_ship(ship, t).
+	LOCAL hvel IS VXCL(b[0], vel).
+	LOCAL mvr IS basis_transform(b, hvel).
+	SET mvr TO V(0, mvr:mag*cos(hdg), mvr:mag*sin(hdg))-mvr.
+	RETURN NODE(t:seconds, mvr:x, mvr:y, mvr:z).
+}
