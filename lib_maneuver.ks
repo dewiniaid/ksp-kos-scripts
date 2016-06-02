@@ -1,44 +1,42 @@
 @LAZYGLOBAL OFF.
+RUN ONCE lib_util.
 RUN ONCE lib_basis.
+RUN ONCE lib_orbit.
 
 // Change semimajor axis at time.
-FUNCTION mvr_semimajoraxis {
+FUNCTION mvr_change_sma {
 	PARAMETER t.  // Maneuver time.
-	PARAMETER target_sma.
-	PARAMETER ship IS ship.  // Can be any orbital.
-	
-	LOCAL obt IS ORBITAT(ship, t).
-	LOCAL b IS obt:body.
-	LOCAL r IS (POSITIONAT(ship, t) - POSITIONAT(b, t)):mag.
-	IF r > target_sma {
+	PARAMETER a.  // New semimajor axis.
+	PARAMETER o IS ship.  // Any Orbital, Orbit, or Orb.
+	SET o TO orb_at_time(o,t).
+	IF o["rmag"] > a*2 { 
 		PRINT "*** WARNING: attempted to plot a maneuver where target_sma < height.".
 		RETURN.
 	}
-	LOCAL dV IS SQRT(b:mu * (2/r - 1/target_sma)) - SQRT(b:mu * (2/r - 1/obt:semimajoraxis)).
-	RETURN NODE(t:seconds, 0, 0, dV).
+	RETURN NODE(t:seconds, 0, 0, SQRT(o["mu"] * (2/o["rmag"] - 1/a)) - SQRT(o["mu"] * (2/o["rmag"] - 1/o["sma"]))).
 }
 
-// Determines the true anomaly where a particular altitude will occur.  
-// (Subtract the result from 360 to get the other possible answer).
-// Must be pe_radius <= radius <= ap_radius
-FUNCTION anomaly_at_radius {
-	PARAMETER radius.
-	PARAMETER orb IS obt.
-	
-	IF radius < (orb:periapsis + orb:body:radius) OR radius > (orb:apoapsis+orb:body:radius) {
-		PRINT "*** WARNING: attempted to find true anomaly at a radius not within pe <= radius <= ap".
+// Circularize at altitude.
+FUNCTION mvr_circularize_at_alt {
+	PARAMETER t.  // Earliest maneuver time.
+	PARAMETER r.  // Altitude.
+	PARAMETER o IS ship.  // Any Orbital, Orbit, or Orb.
+	SET o TO orb_at_time(o,t).
+	IF r < o["pe"] OR r > o["ap"] {
+		PRINT "*** WARNING: attempted to plot a maneuver where r < pe or r > ap.".
 		RETURN.
 	}
-	RETURN ARCCOS((((orb:semimajoraxis*(1-orb:eccentricity^2))/radius) - 1)/orb:eccentricity).
+	LOCAL m IS orb_anomaly_at_radius(r,o,KA_MEAN).
+	LOCAL t IS MIN(
+		orb_next_anomaly(m,o,t,KA_MEAN):seconds,
+		orb_next_anomaly(360-m,o,t,KA_MEAN):seconds
+	).
+	orb_set_time(o,t).
+	LOCAL vel IS (VXCL(o["r"], o["v"]):normalized * SQRT(o["mu"]/r)).
+	RETURN vector_to_node(basis_transform(basis_mvr(o), vel-o["v"]), t).
 }
-
-// Returns time to next LAN.
-
-
-// MJ port.
-FUNCTION clamp360 { PARAMETER v. RETURN mod(v+360,360). }
-FUNCTION clamp180 { PARAMETER v. RETURN mod(v+540,360)-180. }
 	
+
 FUNCTION heading_for_inclination {
 	PARAMETER inc.	// Target inclination.
 	PARAMETER lat.	// Latitude; arcsin(pos:y/pos:mag)
@@ -51,38 +49,62 @@ FUNCTION heading_for_inclination {
 		}
 		RETURN 270.
 	}
-	LOCAL hdg IS arccos(costarget).
-	IF inc<0 { SET hdg TO -hdg. }
-	RETURN Clamp360(90 - hdg).	// 360+90-...
+	RETURN Clamp360(90 - ACOS(costarget,inc)).
 }
 
 // Changes inclination.
 FUNCTION mvr_inclination {
 	PARAMETER t.  // Maneuver time.
 	PARAMETER inc.  // Target inclination
-	PARAMETER ship IS ship.  // Can be any orbital.
+	PARAMETER o IS ship.  // Any Orbital, Orbit, or Orb.
+	SET o TO orb_at_time(o,t).
+	PRINT o["r"].
+	LOCAL vel IS o["v"].
+	PRINT (ToTime(t)-Time):Clock.
 
-	LOCAL vel IS VELOCITYAT(ship, t):orbit.
-	LOCAL obt IS ORBITAT(ship, t).
-	LOCAL r IS POSITIONAT(ship, t) - POSITIONAT(obt:body, t).
-	LOCAL b IS basis_une(vel, r).
-	LOCAL hdg IS heading_for_inclination(inc, ARCSIN(r:y/r:mag)).
-	LOCAL hvel IS VXCL(b[0], vel).	// actualHorizontalVelocity.
-	// LOCAL hvel IS vel.
-	LOCAL n IS b[1]*hvel:mag*cos(hdg).	// North component
-	LOCAL e IS b[2]*hvel:mag*sin(hdg). // eastComponent
+	LOCAL b IS basis_une(o).
+	LOCAL hdg IS heading_for_inclination(inc, ARCSIN(o["r"]:y/o["r"]:mag)).
+	
+	PRINT hdg.
+	
+	LOCAL hvel IS VXCL(b[KB_UP], vel).	// actualHorizontalVelocity.
+	LOCAL e IS b[KB_EAST]*hvel:mag*sin(hdg). // New eastComponent
+	LOCAL n IS b[KB_NORTH]*hvel:mag*cos(hdg).	// New North component
+	IF (n*hvel<0)<>(Clamp180(inc)<0) { SET n TO -n. }
+	PRINT e+n.
+	PRINT hvel.
+	PRINT e+n-hvel.
+	PRINT (e+n)-hvel.
+	RETURN vector_to_node(basis_transform(basis_mvr(o), e+n-hvel), ToSeconds(t)).
+	
+	
 	LOCAL lvel IS basis_transform(b, vel).
 	LOCAL hvel IS V(0,lvel:y,lvel:z).
 	LOCAL tvel IS V(lvel:x,hvel:mag*cos(hdg),hvel:mag*sin(hdg)).
+	PRINT V(0,tvel:y,tvel:z):mag.
 	IF (vel:y<0)=(Clamp180(inc)>0) {
 		SET tvel:y TO -tvel:y.
 	}
-	LOCAL mvr IS basis_transform(basis_for_ship(ship, t), basis_transform(b, tvel-lvel, true)).
-	RETURN NODE(t:seconds, mvr:x, mvr:y, mvr:z).
+	LOCAL mvr IS basis_transform(basis_mvr(o), basis_transform(b, tvel-lvel, true)).
+	// RETURN NODE(t:seconds, mvr:x, mvr:y, mvr:z).
 	
-	LOCAL b IS basis_for_ship(ship, t).
+	LOCAL b IS basis_mvr(o).
 	LOCAL hvel IS VXCL(b[0], vel).
 	LOCAL mvr IS basis_transform(b, hvel).
 	SET mvr TO V(0, mvr:mag*cos(hdg), mvr:mag*sin(hdg))-mvr.
 	RETURN NODE(t:seconds, mvr:x, mvr:y, mvr:z).
-}
+}	
+
+// LOCAL n IS mvr_circularize_at_alt(time, 500*K_KM+body:radius).
+//LOCAL predicted IS orb_predict(obt, n).
+//PRINT predicted.
+//ADD n.
+PRINT time.
+LOCAL o IS orb_from_orbit().
+RUN_TEST("LAN-", -o["argp"]).
+PRINT obt:argumentofperiapsis.
+PRINT o["argp"].
+LOCAL m IS -o["argp"].
+LOCAL result IS orb_next_anomaly(m,o,time,KA_TRUE).
+PRINT (result-time):Clock.
+ADD mvr_inclination(orb_next_anomaly(-obt:argumentofperiapsis,obt,time,KA_TRUE),0).
