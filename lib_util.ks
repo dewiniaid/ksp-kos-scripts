@@ -44,3 +44,18 @@ FUNCTION ToSeconds { PARAMETER t. IF t:IsType("Timespan") { RETURN t:seconds. } 
 FUNCTION RELPOSITION { PARAMETER s. RETURN s:position - s:body:position. }
 // Orbitable only.
 FUNCTION RELPOSITIONAT { PARAMETER s. PARAMETER t. RETURN POSITIONAT(s,t)-POSITIONAT(ORBITAT(s,t):body,t). }
+
+// Equivalent to A + angleaxis(b, theta), but more accurate.
+FUNCTION AngleAxis2 {
+	PARAMETER a. //x,y,z
+	PARAMETER b. //u,v,w
+	PARAMETER theta.
+	LOCAL d IS a*b.
+	LOCAL c IS COS(theta).
+	LOCAL s IS SIN(theta).
+	RETURN V(
+		b:x*d*(1-c) + a:x*c + (-b:z*a:y+b:y*a:z)*s,
+		b:y*d*(1-c) + a:y*c + ( b:z*a:x-b:x*a:z)*s,
+		b:z*d*(1-c) + a:z*c + (-b:y*a:x+b:x*a:y)*s
+	).	
+}

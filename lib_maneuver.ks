@@ -36,7 +36,6 @@ FUNCTION mvr_circularize_at_alt {
 	RETURN vector_to_node(basis_transform(basis_mvr(o), vel-o["v"]), t).
 }
 	
-
 FUNCTION heading_for_inclination {
 	PARAMETER inc.	// Target inclination.
 	PARAMETER lat.	// Latitude; arcsin(pos:y/pos:mag)
@@ -58,53 +57,70 @@ FUNCTION mvr_inclination {
 	PARAMETER inc.  // Target inclination
 	PARAMETER o IS ship.  // Any Orbital, Orbit, or Orb.
 	SET o TO orb_at_time(o,t).
-	PRINT o["r"].
 	LOCAL vel IS o["v"].
-	PRINT (ToTime(t)-Time):Clock.
-
 	LOCAL b IS basis_une(o).
 	LOCAL hdg IS heading_for_inclination(inc, ARCSIN(o["r"]:y/o["r"]:mag)).
-	
-	PRINT hdg.
-	
 	LOCAL hvel IS VXCL(b[KB_UP], vel).	// actualHorizontalVelocity.
 	LOCAL e IS b[KB_EAST]*hvel:mag*sin(hdg). // New eastComponent
 	LOCAL n IS b[KB_NORTH]*hvel:mag*cos(hdg).	// New North component
 	IF (n*hvel<0)<>(Clamp180(inc)<0) { SET n TO -n. }
-	PRINT e+n.
-	PRINT hvel.
-	PRINT e+n-hvel.
-	PRINT (e+n)-hvel.
 	RETURN vector_to_node(basis_transform(basis_mvr(o), e+n-hvel), ToSeconds(t)).
-	
-	
-	LOCAL lvel IS basis_transform(b, vel).
-	LOCAL hvel IS V(0,lvel:y,lvel:z).
-	LOCAL tvel IS V(lvel:x,hvel:mag*cos(hdg),hvel:mag*sin(hdg)).
-	PRINT V(0,tvel:y,tvel:z):mag.
-	IF (vel:y<0)=(Clamp180(inc)>0) {
-		SET tvel:y TO -tvel:y.
-	}
-	LOCAL mvr IS basis_transform(basis_mvr(o), basis_transform(b, tvel-lvel, true)).
-	// RETURN NODE(t:seconds, mvr:x, mvr:y, mvr:z).
-	
-	LOCAL b IS basis_mvr(o).
-	LOCAL hvel IS VXCL(b[0], vel).
-	LOCAL mvr IS basis_transform(b, hvel).
-	SET mvr TO V(0, mvr:mag*cos(hdg), mvr:mag*sin(hdg))-mvr.
-	RETURN NODE(t:seconds, mvr:x, mvr:y, mvr:z).
-}	
+}
 
-// LOCAL n IS mvr_circularize_at_alt(time, 500*K_KM+body:radius).
-//LOCAL predicted IS orb_predict(obt, n).
-//PRINT predicted.
-//ADD n.
-PRINT time.
+// Change inclination, efficiently.  Tries multiple options.  Returns a list of nodes to execute.
+FUNCTION mvr_inclination_ex {
+	PARAMETER t.  // Earliest maneuver time.
+	PARAMETER maxalt.  // Maximum allowed alt of temporary apoapsis change.
+	PARAMETER inc. // Target inclination.
+	PARAMETER o IS ship.  // Any orbital, Orbit or Orb.
+	LOCAL o IS orb_from_orbit(o).
+	LOCAL tnode IS orb_next_anomaly(IIF(o["argp"]<180,180,0)-o["argp"],o,t,KA_TRUE).
+	LOCAL candidates IS LIST().
+	candidates:add(LIST(mvr_inclination(tnode,inc,o))).
+	
+	IF inc<>0 {
+		LOCAL thigh IS ToSeconds(orb_next_anomaly(180,o,t,KA_TRUE)).
+		LOCAL tlow IS ToSeconds(tnode).
+		LOCAL sininc IS ABS(SIN(inc)).
+		IF ABS(SIN(orb_latitude_at_anomaly(thigh))) > sininc {
+			// AP is too high of latitude.  Figure out the anomaly of the nearest location at correct latitude.
+			
+			IF 90 < o["argp"] AND o["argp"] <= 270 {
+				
+				// tnode is descending, so we want northern latitude (positive inclination).
+				
+			
+			
+				
+			LOCAL a1 IS orb_anomaly_at_latitude(
+			
+		IF ABS(orb_latitude_at_anomaly(thigh)) > ABS(inc)
+		
+		LOCAL testo IS orb_at_time(o,thigh).
+		PRINT sininc.
+		PRINT ABS(testo["r"]:y/testo["r"]:mag).
+		IF sininc < ABS(testo["r"]:y/testo["r"]:mag) {
+			// AP is at too high of a latitude, binary search for something at appropriate latitude.
+			UNTIL ABS(thigh-tlow) < 1 {
+				PRINT "Search range is " + tlow + " to " + thigh.
+				// Find the lowest orbit at a latitude no greater than the desired inclination.
+				LOCAL guess IS (thigh+tlow)/2.
+				LOCAL testo IS orb_at_time(o,guess).
+				IF sininc < ABS(testo["r"]:y/testo["r"]:mag) {
+					// Too high of a latitude, go to the lower half of the search space.
+					SET thigh TO guess.
+				} ELSE {
+					SET tlow TO guess.
+				}
+			}
+		}
+		candidates:add(LIST(mvr_inclination(thigh,inc,o))).
+	}
+	RETURN candidates.
+}
+
 LOCAL o IS orb_from_orbit().
-RUN_TEST("LAN-", -o["argp"]).
-PRINT obt:argumentofperiapsis.
-PRINT o["argp"].
-LOCAL m IS -o["argp"].
-LOCAL result IS orb_next_anomaly(m,o,time,KA_TRUE).
-PRINT (result-time):Clock.
-ADD mvr_inclination(orb_next_anomaly(-obt:argumentofperiapsis,obt,time,KA_TRUE),0).
+LOCAL t IS TIME.
+LOCAL tlan IS ToSeconds(orb_next_anomaly(-o["argp"],o,t).
+LOCAL tldn IS ToSeconds(orb_next_anomaly(180-o["argp"],o,t).
+

@@ -144,10 +144,15 @@ FUNCTION orb_update {
 		// IF o["eccanomaly"]>180 { SET o["trueanomaly"] TO 360-o["trueanomaly"]. }
 	}
 	IF what:contains("r") {  // Position vector.
-		SET o["r"] TO (
-			V(o["sma"]*(COS(o["eccanomaly"])-o["ecc"]), 0, o["smna"]*SIN(o["eccanomaly"]))
-			+ ANGLEAXIS(IIF(o["argp"]+o["trueanomaly"]>180,-o["inc"],o["inc"]),V(COS(-o["argp"]),0,SIN(-o["argp"])))
-			+ R(0,-o["argp"] + solarprimevector:direction:yaw - 90 - o["lan"],0)
+		SET o["rmag"] TO o["sma"]*(1-o["ecc"]^2)/(1+o["ecc"]*COS(o["trueanomaly"])).
+		LOCAL i IS IIF(o["trueanomaly"]>180,o["inc"],-o["inc"]).
+		SET o["r"] TO AngleAxis2(
+			AngleAxis2(
+				V(o["sma"]*(COS(o["eccanomaly"])-o["ecc"]), 0, o["smna"]*SIN(o["eccanomaly"])),
+				V(COS(-o["argp"]),0,SIN(-o["argp"])),
+				IIF(o["trueanomaly"]>180,o["inc"],-o["inc"])
+			),
+			K_Y, -o["argp"] + solarprimevector:direction:yaw - 90 - o["lan"]
 		).
 	}
 	IF what:contains("v") {  // Velocity vector.
@@ -242,6 +247,14 @@ FUNCTION orb_anomaly_at_radius {
 	RETURN orb_convert_anomaly(ARCCOS((((o["sma"]*(1-o["ecc"]^2))/r) - 1)/o["ecc"]), o["ecc"], KA_TRUE, want).
 }
 
+FUNCTION orb_radius_for_anomaly {
+	PARAMETER m.  // Anomaly value.
+	PARAMETER o IS obt.
+	PARAMETER have IS KA_TRUE.  // Anomaly type
+	SET o TO orb_from_orbit(o).
+	RETURN o["sma"]*(1-o["ecc"]^2)/(1+o["ecc"]*COS(orb_convert_anomaly(m,o,have,KA_TRUE))).
+}
+
 // Returns the next time a particular anomaly value will be reached.
 // (Hint: Time to periapsis = orb_next_anomaly(0,...); time to apoapsis = orb_next_anomaly(180,...).
 FUNCTION orb_next_anomaly {
@@ -259,6 +272,14 @@ FUNCTION orb_next_anomaly {
 	IF result<t { RETURN ToTime(result+o["period"]). }
 	RETURN ToTime(result).
 }
+FUNCTION orb_prev_anomaly {
+	PARAMETER m.  // Anomaly value.
+	PARAMETER o IS obt.
+	PARAMETER t IS TIME.  // Time must be greater than this value.
+	PARAMETER have IS KA_TRUE.
+	SET o TO orb_from_orbit(o).
+	RETURN orb_next_anomaly(m,o,t-o["period"],have).
+}
 
 // Returns a predicted orbit based on a maneuver node.
 FUNCTION orb_predict {
@@ -271,4 +292,29 @@ FUNCTION orb_predict {
 	}
 	LOCAL o IS orb_at_time(o,t).
 	RETURN orb_from_vectors(o["r"], o["v"] + basis_transform(basis_mvr(), n, True), o["body"], t).
+}
+
+// Returns latitude at a particular anomaly value.
+// I derived this one myself!
+// sin(lat) = sin(true + argp) * cos(90 - inc)
+FUNCTION orb_latitude_for_anomaly {
+	PARAMETER m.  // Anomaly value.
+	PARAMETER o IS obt.
+	PARAMETER have IS KA_TRUE.
+	SET o TO orb_from_orbit(o).
+	SET m TO orb_convert_anomaly(m, o["ecc"], have, KA_TRUE).
+	RETURN ARCSIN(SIN(m+o["argp"]) * COS(90-o["inc"])).
+}
+
+// Returns expected anomaly value for a particular latitude.
+FUNCTION orb_anomaly_at_latitude {
+	PARAMETER lat.
+	PARAMETER o IS obt.
+	PARAMETER want IS KA_TRUE.  // Desired return anomaly type.
+	PARAMETER alt IS FALSE.  // Return other alternate anomaly value.
+	SET o TO orb_from_orbit(o).
+	IF alt {
+		RETURN orb_convert_anomaly(-ARCSIN(SIN(lat)/COS(90-o["inc"])) + 180 - o["argp"], o["ecc"], KA_TRUE, want).
+	}
+	RETURN orb_convert_anomaly(ARCSIN(SIN(lat)/COS(90-o["inc"])) - o["argp"], o["ecc"], KA_TRUE, want).
 }
