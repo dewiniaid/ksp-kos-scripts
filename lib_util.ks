@@ -4,6 +4,8 @@ GLOBAL K_PI IS constant():pi.  // Shorter!
 // Divide to convert degrees to radians, multiply to convert radians to degrees.
 GLOBAL K_DEGREES IS 180/K_PI.
 
+GLOBAL K_EPSILON IS 1E-15.
+
 // Units.
 GLOBAL K_M IS 1. GLOBAL K_KM IS K_M*1000. GLOBAL K_MM IS K_KM*1000. GLOBAL K_GM IS K_MM*1000.
 

@@ -244,7 +244,10 @@ FUNCTION orb_anomaly_at_radius {
 		PRINT "*** WARNING: attempted to find true anomaly where pe <= radius <= ap is false.".
 		RETURN.
 	}
-	RETURN orb_convert_anomaly(ARCCOS((((o["sma"]*(1-o["ecc"]^2))/r) - 1)/o["ecc"]), o["ecc"], KA_TRUE, want).
+	LOCAL v IS ((((o["sma"]*(1-o["ecc"]^2))/r) - 1)/o["ecc"]).
+	IF v>1 AND v<1+K_EPSILON { RETURN 0. }
+	IF v<-1 AND v>1-K_EPSILON { RETURN 180. }
+	RETURN orb_convert_anomaly(ARCCOS(v), o["ecc"], KA_TRUE, want).
 }
 
 FUNCTION orb_radius_for_anomaly {
