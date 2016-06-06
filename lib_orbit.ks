@@ -46,6 +46,8 @@ FUNCTION orb_from_orbit {
 	LOCAL r IS RELPOSITION(obt).
 	LOCAL v IS obt:velocity:orbit.
 	// Create most of the initial orbit parameters, and then change epoch to our reference time.
+	// See github.com/KSP-KOS/KOS/issues/1665 for why we can't just use obt:meananomalyatepoch.
+	LOCAL mna IS orb_convert_anomaly(obt:trueanomaly,obt:eccentricity,KA_TRUE,KA_MEAN).
 	LOCAL orb IS orb_update(LEXICON(
 		"body", obt:body,
 		"ecc", obt:eccentricity,
@@ -53,7 +55,7 @@ FUNCTION orb_from_orbit {
 		"inc", obt:inclination,
 		"lan", obt:lan,
 		"argp", obt:argumentofperiapsis,
-		"mna", obt:meananomalyatepoch,
+		"mna", mna,
 		"epoch", time,
 		"period", obt:period,
 		"ap", obt:apoapsis + obt:body:radius,
@@ -66,11 +68,12 @@ FUNCTION orb_from_orbit {
 		"vmag", v:mag,
 		"v", v
 	), "d").
-	IF t=TIME {
-		orb_update(orb, "e").
-	} ELSE {
-		orb_set_time(orb, t).
-	}
+	orb_update(orb, "etrv").
+	//IF t=TIME {
+	//	orb_update(orb, "etrv").
+	//} ELSE {
+	orb_set_time(orb, t).
+	//}
 	RETURN orb.
 }
 
@@ -125,13 +128,18 @@ FUNCTION orb_convert_anomaly {
 FUNCTION orb_update {
 	PARAMETER o.
 	PARAMETER what IS "etrv".  // Determines which parameters to recalculate.  By default, only temporal parameters.
+	IF what:contains("*") {
+		SET what TO "odetrvl".
+	}
 	
 	SET o["mu"] TO o["body"]:mu.
 	IF what:contains("o") {
-		SET o["pe"] TO (1-o["ecc"])*o["sma"].
-		SET o["ap"] TO (1+o["ecc"])*o["sma"].
-		SET o["period"] TO 2*constant():pi*SQRT(o["sma"]^3 / o["body"]:mu).
-		SET o["smna"] TO ABS(o["sma"]*SQRT(1 - o["ecc"]^2)).
+		LEX_UPDATE(o, LEXICON(
+			"pe", (1-o["ecc"])*o["sma"],
+			"ap", (1+o["ecc"])*o["sma"],
+			"period", 2*constant():pi*SQRT(o["sma"]^3 / o["body"]:mu),
+			"smna", ABS(o["sma"]*SQRT(1 - o["ecc"]^2))
+		)).
 	}
 	IF what:contains("d") {
 		SET o["slr"] TO o["smna"]^2/o["sma"].
@@ -150,17 +158,20 @@ FUNCTION orb_update {
 			AngleAxis2(
 				V(o["sma"]*(COS(o["eccanomaly"])-o["ecc"]), 0, o["smna"]*SIN(o["eccanomaly"])),
 				V(COS(-o["argp"]),0,SIN(-o["argp"])),
-				IIF(o["trueanomaly"]>180,o["inc"],-o["inc"])
+				o["inc"]  //IIF(Clamp360(o["argp"]+o["trueanomaly"])>180,-o["inc"],o["inc"])
 			),
 			K_Y, -o["argp"] + solarprimevector:direction:yaw - 90 - o["lan"]
 		).
+		IF (o["r"]:y<0)<>(CLAMP360(o["argp"]+o["trueanomaly"])>180) {
+			SET o["r"]:y TO -o["r"]:y.
+		}
 	}
 	IF what:contains("v") {  // Velocity vector.
 		SET o["vmag"] TO SQRT(o["mu"]*(2/o["rmag"]-1/o["sma"])).
 		// Can't directly calculate velocity; so compare positions in a 1-second window centered on our epoch.
 		// Make sure we don't ask those calculations to include a velocity.
-		LOCAL prev IS orb_set_time(o:copy(), o["epoch"]-0.5, "etr").
-		LOCAL next IS orb_set_time(o:copy(), o["epoch"]+0.5, "etr").
+		LOCAL prev IS orb_at_time(o, o["epoch"]-0.5, "etr").
+		LOCAL next IS orb_at_time(o, o["epoch"]+0.5, "etr").
 		SET o["v"] TO next["r"]-prev["r"].
 	}
 	RETURN o.
@@ -216,7 +227,7 @@ FUNCTION orb_from_vectors {
 		"body", b,
 		"ecc", ecc,
 		"sma", -mu/(2*((v:SQRMAGNITUDE)/2 - (mu/r:mag))),
-		"inc", 180 - arccos(h:y/h:mag),  // Inclination.  0=polar, 90=equatorial.
+		"inc", 180 - ACOS(h:y/h:mag),  // Inclination.  0=polar, 90=equatorial.
 		"lan", ACOS(n:x/n:mag, n:z) - ACOS(solarprimevector:x, solarprimevector:z),
 		"argp", ACOS((evec*n)/(evec:mag*n:mag), evec:y),
 		// "mna", Clamp360(mult * K_DEGREES * (ea/K_DEGREES - ecc*SIN(ea))),
@@ -245,9 +256,7 @@ FUNCTION orb_anomaly_at_radius {
 		RETURN.
 	}
 	LOCAL v IS ((((o["sma"]*(1-o["ecc"]^2))/r) - 1)/o["ecc"]).
-	IF v>1 AND v<1+K_EPSILON { RETURN 0. }
-	IF v<-1 AND v>1-K_EPSILON { RETURN 180. }
-	RETURN orb_convert_anomaly(ARCCOS(v), o["ecc"], KA_TRUE, want).
+	RETURN orb_convert_anomaly(ACOSE(v), o["ecc"], KA_TRUE, want).
 }
 
 FUNCTION orb_radius_for_anomaly {
@@ -306,7 +315,7 @@ FUNCTION orb_latitude_for_anomaly {
 	PARAMETER have IS KA_TRUE.
 	SET o TO orb_from_orbit(o).
 	SET m TO orb_convert_anomaly(m, o["ecc"], have, KA_TRUE).
-	RETURN ARCSIN(SIN(m+o["argp"]) * COS(90-o["inc"])).
+	RETURN ASINE(SIN(m+o["argp"]) * COS(90-o["inc"])).
 }
 
 // Returns expected anomaly value for a particular latitude.
@@ -317,7 +326,7 @@ FUNCTION orb_anomaly_at_latitude {
 	PARAMETER alt IS FALSE.  // Return other alternate anomaly value.
 	SET o TO orb_from_orbit(o).
 	IF alt {
-		RETURN orb_convert_anomaly(-ARCSIN(SIN(lat)/COS(90-o["inc"])) + 180 - o["argp"], o["ecc"], KA_TRUE, want).
+		RETURN orb_convert_anomaly(-ASINE(SIN(lat)/COS(90-o["inc"])) + 180 - o["argp"], o["ecc"], KA_TRUE, want).
 	}
-	RETURN orb_convert_anomaly(ARCSIN(SIN(lat)/COS(90-o["inc"])) - o["argp"], o["ecc"], KA_TRUE, want).
+	RETURN orb_convert_anomaly(ASINE(SIN(lat)/COS(90-o["inc"])) - o["argp"], o["ecc"], KA_TRUE, want).
 }
