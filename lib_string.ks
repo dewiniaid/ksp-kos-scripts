@@ -317,7 +317,7 @@ FUNCTION str_force_e {
 			IF a="=" { // Sign-align.
 				RETURN sign + str_repeat(f, w-sign:length).
 			}
-			RETURN _fmt_align(v,f,IIF(a="a",">",a),w).
+			RETURN _fmt_align(sign + v,f,IIF(a="a",">",a),w).
 		}
 		RETURN _fmt_align(v,f,a,w,p).
 	}
@@ -335,7 +335,6 @@ FUNCTION str_force_e {
 		LOCAL width IS 0.
 		LOCAL precision IS -1.
 		LOCAL align IS "a".
-		LOCAL sign IS " ".
 		
 		IF var<>"" {
 			LOCAL isnum IS TRUE.
@@ -405,6 +404,7 @@ FUNCTION str_force_e {
 	LOCAL _cachemax IS 20.
 	FUNCTION _compile {
 		PARAMETER fmt.  // Format string
+		PARAMETER usecache IS TRUE.  // Save results to cache.
 		// We use a Very Naive Cache, where we remember up to _cachemax distinct calls to compile().
 		// Rather than implement any logic to determine which element to expire if the cache gets full,
 		// we simply void the entire cache.  Not super effective, but better than no cache at all.
@@ -425,10 +425,12 @@ FUNCTION str_force_e {
 			IF bs<0 AND br<0 {
 				chunk:add(fmt:substring(ix, flen-ix)).
 				result:add(chunk:join("")).
-				IF _cache:length >= _cachemax {
-					_cache:clear().
+				IF usecache {
+					IF _cache:length >= _cachemax {
+						_cache:clear().
+					}
+					SET _cache[fmt] TO result.
 				}
-				SET _cache[fmt] TO result.
 				RETURN result.
 			}
 			IF br<0 OR (bs>=0 AND bs<br) {
@@ -479,6 +481,14 @@ FUNCTION str_force_e {
 		}
 		RETURN result:join("").
 	}
+	
+	FUNCTION _formatter {
+		PARAMETER fmt.
+		If fmt:IsType("String") { SET fmt TO _compile(fmt, FALSE). }
+		RETURN _format@:bind(fmt).
+	}
+		
 	GLOBAL str_format IS _format@.
+	GLOBAL str_formatter IS _formatter@.
 	GLOBAL str_format_compile IS _compile@.
 }
