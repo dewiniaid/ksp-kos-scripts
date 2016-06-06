@@ -25,13 +25,18 @@ FUNCTION Clamp180 { PARAMETER v. RETURN MOD(v+540,360)-180. }
 {
 	LOCAL FUNCTION fn {
 		PARAMETER f.
+		PARAMETER e.  // True: Coerce 1+epsilon to 1 and -1+epsilon to -1.
 		PARAMETER x.
 		PARAMETER y IS 0.
+		IF e AND x>1 AND x-K_EPSILON<=1 { SET x TO 1. }
+		IF e AND x<-1 AND x+K_EPSILON>=-1 { SET x TO -1. }
 		IF y >= 0 { RETURN f(x). }
 		RETURN 360-f(x).
 	}
-	GLOBAL ASIN IS fn@:bind(arcsin@).
-	GLOBAL ACOS IS fn@:bind(arccos@).
+	GLOBAL ASIN IS fn@:bind(arcsin@, false).
+	GLOBAL ACOS IS fn@:bind(arccos@, false).
+	GLOBAL ASINE IS fn@:bind(arcsin@, true).
+	GLOBAL ACOSE IS fn@:bind(arccos@, true).
 }
 
 // kOS doesn't have any good methods for constructing our own timespan.  Fakery.
@@ -60,4 +65,17 @@ FUNCTION AngleAxis2 {
 		b:y*d*(1-c) + a:y*c + ( b:z*a:x-b:x*a:z)*s,
 		b:z*d*(1-c) + a:z*c + (-b:y*a:x+b:x*a:y)*s
 	).	
+}
+
+// Update lexicon dst from sequence or lexicon src.  Returns dst.
+FUNCTION LEX_UPDATE {
+	PARAMETER dst.
+	PARAMETER src.
+	IF NOT src:istype("Lexicon") {
+		SET src TO LEXICON(src).
+	}
+	FOR k IN src:keys {
+		SET dst[k] TO src[k].
+	}
+	RETURN dst.
 }
