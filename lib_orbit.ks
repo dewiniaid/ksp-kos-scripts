@@ -213,10 +213,16 @@ FUNCTION orb_update {
 	}
 	IF what:contains("r") {  // Position vector.
 		SET o["rmag"] TO o["sma"]*(1-o["ecc"]^2)/(1+o["ecc"]*COS(o["trueanomaly"])).
-		LOCAL i IS IIF(o["trueanomaly"]>180,o["inc"],-o["inc"]).
+		//LOCAL i IS IIF(Clamp360(o["trueanomaly"]+o["argp"])>180,o["inc"],-o["inc"]).
+		LOCAL p IS 0.
+		IF o["ecc"] > 1 {
+			SET p TO V(o["sma"]*(COSH(o["eccanomaly"])-o["ecc"]), 0, o["smna"]*SINH(o["eccanomaly"])).
+		} ELSE {
+			SET p TO V(o["sma"]*(COS(o["eccanomaly"])-o["ecc"]), 0, o["smna"]*SIN(o["eccanomaly"])).
+		}
 		SET o["r"] TO AngleAxis2(
 			AngleAxis2(
-				V(o["sma"]*(COS(o["eccanomaly"])-o["ecc"]), 0, o["smna"]*SIN(o["eccanomaly"])),
+				p,
 				V(COS(-o["argp"]),0,SIN(-o["argp"])),
 				o["inc"]  //IIF(Clamp360(o["argp"]+o["trueanomaly"])>180,-o["inc"],o["inc"])
 			),
