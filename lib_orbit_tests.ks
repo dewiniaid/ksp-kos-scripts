@@ -6,18 +6,15 @@ LOCAL fmt IS str_format@.
 
 LOCAL t IS TIME.
 LOCAL o IS orb_from_orbit(ship, t).
-PRINT "before time set.".
-orb_set_time(o, t-10).
-PRINT "after  time set.".
 
 LOCAL test_sep IS str_repeat("-", 20).
 LOCAL group_sep IS str_repeat("=", 40).
 PRINT FMT("Orbital period: {0:.2}  ({0!d})  arate: {1:.2}  ({1!d})", LIST(ToSeconds(o["period"]), o["arate"])).
 PRINT group_sep.
-
+LOCAL atype IS LEXICON(KA_TRUE, "v", KA_ECC, "E", KA_MEAN, "M").
+	
 {
 	PRINT "Testing orb_next_anomaly predictions...".
-	LOCAL atype IS LEXICON(KA_TRUE, "v", KA_ECC, "E", KA_MEAN, "M").
 	FUNCTION TEST {
 		PARAMETER text.
 		PARAMETER m.
@@ -67,26 +64,26 @@ PRINT group_sep.
 }
 PRINT group_sep.
 {	
-	PRINT "Testing anomaly<=>radius conversions (using True Anomaly values)...".
-	PRINT "[Descript]   [Anom]   [______ActualRadius]   [__CalculatedRadius]   [_____________Delta]   TgtAnom   [Calc1]   [Calc2]   _Delta1   _Delta2".
-	LOCAL fmt_withradius IS str_formatter("{0:.<10} _ {1:6.2} _ {2:20.2} _ {3:20.2} _ {4:20.2} _ {5:7.3} _ {6:7.3} _ {7:+6.3} _ {8:+6.1} _ {9:+6.1}").
-	LOCAL fmt_noradius   IS str_formatter("{0:.<10} _ {1:6.2} _                -n/a- _ {3:20.2} _                -n/a- _ {5:7.3} _ {6:7.3} _ {7:+6.3} _ {9:+6.1} _ {8:+6.1}").
+	PRINT "Testing anomaly<=>radius conversions...".
+	PRINT "[Descript]   [__Anom]   [______ActualRadius]   [__CalculatedRadius]   [_____________Delta]   TgtAnom   [Calc1]   [Calc2]   _Delta1   _Delta2".
+	LOCAL fmt_withradius IS str_formatter("{0:.<10} _ {10}={1:6.2} _ {2:20.2} _ {3:20.2} _ {4:20.2} _ {5:7.3} _ {6:7.3} _ {7:+6.3} _ {8:+7.2} _ {9:+7.2}").
+	LOCAL fmt_noradius   IS str_formatter("{0:.<10} _ {10}={1:6.2} _                -n/a- _ {3:20.2} _                -n/a- _ {5:7.3} _ {6:7.3} _ {7:+6.3} _ {8:+7.2} _ {9:+7.2}").
 	
 	FUNCTION TEST {
 		PARAMETER desc.
 		PARAMETER r.
 		PARAMETER m.
-		SET m TO (m).
-		LOCAL testr IS orb_radius_for_anomaly(m,o,KA_TRUE).
+		PARAMETER k IS KA_TRUE.
+		LOCAL testr IS orb_radius_for_anomaly(m,o,k).
 		LOCAL testm IS (orb_anomaly_at_radius(testr,o,KA_TRUE)).
-		PRINT IIF(r<>0,fmt_withradius@,fmt_noradius@)(LIST(desc, m, r, testr, r-testr, m, testm, 360-testm, m-testm, m-(360-testm))).
+		PRINT IIF(r<>0,fmt_withradius@,fmt_noradius@)(LIST(desc, m, r, testr, r-testr, m, testm, 360-testm, m-testm, m-(360-testm),atype[k])).
 	}
 	TEST("Periapsis", o["pe"], 0).
 	TEST("Apoapsis", o["ap"], 180).
-	TEST("LAN", 0, -o["argp"]).
-	TEST("LDN", 0, 180-o["argp"]).
-	TEST("North", 0, 90-o["argp"]).
-	TEST("South", 0, 270-o["argp"]).
+	TEST("LAN", 0, Clamp360(-o["argp"])).
+	TEST("LDN", 0, Clamp360(180-o["argp"])).
+	TEST("North", 0, Clamp360(90-o["argp"])).
+	TEST("South", 0, Clamp360(270-o["argp"])).
 }
 PRINT group_sep.
 {
