@@ -23,11 +23,13 @@ RUN ONCE lib_basis.
 // o pe:    Periapsis.  Unlike KSP periapsis, this includes the body radius.
 // o period: Orbital period.
 // o smna:  Semi-minor axis. (b)
+// o hev:   Hyperbolic Excess Velocity (v-infinity)
 // d mu:    Shortcut to body:mu.
 // d slr:   Semi-latus rectum. (l)
+// d arate: Mean angular rate.
 
 // TEMPORAL ELEMENTS (time-based, relative to defined epoch).
-// e eccentricanomaly: Eccentric Anomaly.
+// e eccanomaly: Eccentric Anomaly; or hyperbolic anomaly if e>1
 // t trueanomaly: True Anomaly.
 // l lat:   Latitude.
 // l lon:   Longitude.
@@ -43,6 +45,7 @@ FUNCTION orb_from_orbit {
 	IF o:istype("lexicon") { RETURN o. }
 	SET t TO ToTime(t).
 	IF o:istype("orbitable") { SET o TO ORBITAT(o, t:seconds). }
+	WAIT 0.
 	LOCAL r IS RELPOSITION(obt).
 	LOCAL v IS obt:velocity:orbit.
 	// Create most of the initial orbit parameters, and then change epoch to our reference time.
@@ -77,49 +80,93 @@ FUNCTION orb_from_orbit {
 	RETURN orb.
 }
 
-
+// Converts an anomaly from one type to another.
+// Returns FALSE on a failed conversion.  (Use IsFalse() to check return values, since 0 is also a valid return).
 FUNCTION orb_convert_anomaly {
 	PARAMETER m.   // Input anomaly
 	PARAMETER e.   // Input eccentricity.
 	PARAMETER have IS KA_MEAN.  // Anomaly type of input.
 	PARAMETER want IS KA_ECC.   // Anomaly type of output.
-	PARAMETER attempts IS 100.  // Max attempts for iterative conversions (mean->not mean)
-	SET m TO Clamp360(m).
-	IF m=0 OR m=180 OR e=0 OR have=want { RETURN m. }  // No conversion needed.
-	IF m>180 { RETURN 360-orb_convert_anomaly(360-m, e, have, want, attempts). }
+	IF have=want { RETURN m. }  // No conversion needed.
 
-	IF have=KA_MEAN { // Converting from mean.  Needs at least eccentric.
-		LOCAL lower IS m.
-		LOCAL upper IS 180.
-		IF DEFINED(eccentric_anomaly_table) {
-			// Faster calculations if we have the anomaly table loaded.
-			LOCAL t IS eccentric_anomaly_table.
-			LOCAL r IS FLOOR(e*T:length).
-			LOCAL c IS FLOOR(m/180 * T[0]:length).
-			SET upper TO t[r][c].
-			IF r>0 AND c>0 { SET lower TO t[r-1][c-1]. }
-		}
-		LOCAL guess IS (lower+upper)/2.
-		SET m TO m/K_DEGREES.
-		FOR _ IN RANGE(attempts) {
-			SET guess TO (lower+upper)/2.
-			LOCAL err IS (guess/K_DEGREES - e*SIN(guess))-m.
-			IF ABS(err) < 1e-15 { BREAK. }
-			IF err > 0 {
-				SET upper TO guess.
-			} ELSE {
-				SET lower TO guess.
+	IF e<=1 {
+		SET m TO Clamp360(m).
+		IF e=0 OR m=0 OR m=180 { RETURN m. }
+		IF m>180 { RETURN 360-orb_convert_anomaly(360-m,e,have,want). }
+	}
+
+	LOCAL s IS IIF(m<0,-1,1).	// Sign.
+
+	IF have=KA_MEAN { // Converting from mean -> eccentric -> maybe true.
+		LOCAL ok IS 0.  // Set to 1 upon converge.
+		LOCAL o IS m*s.
+		IF e>1 {
+			// Hyperbolic orbit, computing hyperbolic anomaly.
+			// Based on solving algorithm listed here: http://www.projectpluto.com/kepler.htm
+			LOCAL r IS o/K_DEGREES.  // Mean anomaly in radians.
+			LOCAL d IS 0.  // Delta ('error')
+			SET m TO r/(e-1).
+			IF m^2 > 6*(e-1) {
+				if o<180 {
+					SET m TO (6*r)^(1/3).
+				} ELSE {
+					SET m TO ASINH(o/e)/K_DEGREES.
+				}
+			}
+			FOR _ IN RANGE(100) {
+				//  err = ecc * sinh( curr) - curr - mean_anom;
+				SET d TO e*SINH(m*K_DEGREES)-m-r.
+				IF ABS(d)<K_EPSILON { SET ok TO 1. BREAK. }
+				SET m TO m-d/(e*COSH(m*K_DEGREES)-1).
+			}
+			IF ok=0 {
+				PRINT str_format("*** Failed to converge on hyperbolic anomaly (inputs: mean={}, ecc={}) ***", LIST(s*o,e)).
+			}
+			SET m TO s*m*K_DEGREES.
+		} ELSE {
+			// Elliptical (possibly circular) orbit.
+			// Implemented from [A Practical Method for Solving the Kepler Equation]
+			// by Marc A. Murison from the U.S. Naval Observatory
+			// See: http://murison.alpheratz.net/dynamics/twobody/KeplerIterations_summary.pdf
+			// (Ported from https://github.com/RazerM/orbital/blob/0.7.0/orbital/utilities.py#L252 )
+			LOCAL r IS m/K_DEGREES.  // Mean anomaly in radians.
+			SET m TO r+(e^3/2+e+(e^2+1.5*cos(m)*e^3)*cos(m))*sin(m).	// Starting guess
+			FOR _ IN RANGE(100) {
+				LOCAL p IS m.	// Store previous guess
+				LOCAL c IS COS(m*K_DEGREES).	
+				LOCAL s IS SIN(m*K_DEGREES).
+				LOCAL f IS e*s+r-m.
+				LOCAL z IS f/(f*e*s/2/(e*c-1)+e*c-1).
+				SET m TO m-f/((s/2-c*z/6)*e*z+e*c-1).
+				IF ABS(m-p)<K_EPSILON { SET ok to 1. BREAK. }
+			}
+			IF ok=0 {
+				PRINT str_format("*** Failed to converge on eccentric anomaly (inputs: mean={}, ecc={}) ***", LIST(o,e)).
+			}
+			SET m TO m*K_DEGREES.
+			IF m<0 OR m>=360 {
+				PRINT str_format("*** Clamp may be needed for eccentric anomaly (inputs: mean={}, ecc={}, output: {}) ***", LIST(o,e,m)).
+				SET m TO Clamp360(m).  // TODO: See if the clamp is even neccessary.
 			}
 		}
-		SET m TO guess.
-	} ELSE IF have=KA_TRUE { // Converting from true anomaly.
-		SET m TO ACOS((e+COS(m))/(1+e*COS(m))).
+	} ELSE IF have=KA_TRUE { // Converting from true -> eccentric -> maybe mean.
+		LOCAL v IS ((e+cos(s*m))/(1+e*cos(s*m))).
+		IF e>1 AND v<=-1 {
+			PRINT str_format("*** No solution for true anomaly (inputs: true={}, ecc={}; v: {}) ***", LIST(m,e,v)).
+			RETURN FALSE.
+		}
+		SET m TO s*IIF(e>1,ACOSH@,ACOS@)(v).
 	}
 	// If we're here, we have an eccentric anomaly.  Which direction are we converting?
 	IF want=KA_MEAN {
-		RETURN Clamp360(K_DEGREES * (m/K_DEGREES - e*SIN(m))).
-	} ELSE IF want=KA_TRUE {
-		RETURN Clamp360(ACOS((COS(m)-e)/(1-e*COS(m)))).
+		IF e>1 {	// Hyperbolic.
+			RETURN K_DEGREES*(e*SINH(m)-m/K_DEGREES).
+		}
+		RETURN K_DEGREES*(m/K_DEGREES-e*SIN(m)).
+	}
+	IF want=KA_TRUE {
+		LOCAL c IS IIF(e>1,COSH@,COS@)(m).
+		RETURN ACOS((c-e)/(1 - e*c)).
 	}
 	RETURN m.
 }
@@ -135,13 +182,26 @@ FUNCTION orb_update {
 	SET o["mu"] TO o["body"]:mu.
 	IF what:contains("o") {
 		LEX_UPDATE(o, LEXICON(
-			"pe", (1-o["ecc"])*o["sma"],
 			"ap", (1+o["ecc"])*o["sma"],
-			"period", 2*constant():pi*SQRT(o["sma"]^3 / o["body"]:mu),
-			"smna", ABS(o["sma"]*SQRT(1 - o["ecc"]^2))
+			"pe", ABS(o["ecc"]-1)*o["sma"],
+			"smna", ABS(o["sma"])*SQRT(ABS(1-o["ecc"]^2))
 		)).
 	}
 	IF what:contains("d") {
+		IF o["ecc"]>1 {
+			LEX_UPDATE(o, LEXICON(
+				"hev", SQRT(o["mu"]/-o["sma"]),
+				"departureangle", 2*arccos(-1/o["ecc"]),
+				"period", 2*K_PI*(1/SQRT(o["mu"] / ABS(o["sma"])^3))
+			)).
+		} ELSE {
+			LEX_UPDATE(o, LEXICON(
+				"hev", 0,
+				"departureangle", 0,
+				"period", 2*K_PI*SQRT((o["sma"])^3 / o["mu"])
+			)).
+		}
+		SET o["arate"] TO o["period"]/360.
 		SET o["slr"] TO o["smna"]^2/o["sma"].
 	}
 	IF what:contains("e") {  // Eccentric anomaly
@@ -183,8 +243,11 @@ FUNCTION orb_set_time {
 	PARAMETER t IS TIME.
 	PARAMETER calc IS "etrv".  // What to recalculate after epoch change.
 	SET t TO ToTime(t).
+	
 	IF t=o["epoch"] { RETURN o. }
-	SET o["mna"] TO Clamp360(o["mna"] + MOD((t-o["epoch"]):seconds, o["period"])*360/o["period"]).
+	LOCAL m IS o["mna"] + (ToSeconds(t)-ToSeconds(o["epoch"]))/o["arate"].
+	IF o["ecc"]<=1 { SET m TO Clamp360(m). }
+	SET o["mna"] TO m.  // Clamp360(o["mna"] + o["arate"]*Mod((t-o["epoch"]):seconds,o["period"])).   // , o["period"])*360/o["period"]).
 	SET o["epoch"] TO t.
 	RETURN orb_update(o, calc).
 }
@@ -201,6 +264,15 @@ FUNCTION orb_at_time {
 	}
 }
 
+// Shortcut to orb_at_time(o,orb_next_anomaly(m,o,t,have)).
+FUNCTION orb_at_anomaly {
+	PARAMETER m.  // Anomaly value.
+	PARAMETER o IS obt.
+	PARAMETER t IS TIME.  // Time must be greater than this value.
+	PARAMETER have IS KA_TRUE.
+	RETURN orb_at_time(o,orb_next_anomaly(m,o,t,have)).
+}
+	
 // Create orbit from state vectors.
 FUNCTION orb_from_vectors {
 	PARAMETER r IS RELPOSITION(obt).
@@ -213,9 +285,9 @@ FUNCTION orb_from_vectors {
 	LOCAL evec IS ((v:SQRMAGNITUDE - mu/r:mag) * r - (r*v)*v).	// Eccentricity.
 	LOCAL ecc IS evec:mag / mu.	// Eccentricity.
 	LOCAL n IS v(h:z, 0, -h:x).  // Node vector.
-	LOCAL argp IS ACOS((evec*n)/(evec:mag*n:mag), evec:y).
+	LOCAL argp IS ACOSL((evec*n)/(evec:mag*n:mag), evec:y).
 	LOCAL mult IS IIF(r*v < 0, -1, 1).
-	LOCAL ta IS ACOS(evec*r/(evec:mag*r:mag),mult).  // True anomaly
+	LOCAL ta IS ACOSL(evec*r/(evec:mag*r:mag),mult).  // True anomaly
 	//LOCAL ea IS ACOS((ecc+COS(ta))/(1+ecc*COS(ta)),mult).  // Ecc anomaly
 	LOCAL ea IS orb_convert_anomaly(ta, ecc, KA_TRUE, KA_ECC).
 	
@@ -244,19 +316,19 @@ FUNCTION orb_from_vectors {
 
 // Returns one of two anomaly values where a particular altitude will occur.
 // (Subtract the result from 360 to get the other possible answer).
+//
+// To minimize the effects of fp-error, values < PE will return 0, values > AP will return 180.
 // Must be pe <= r <= ap
 FUNCTION orb_anomaly_at_radius {
 	PARAMETER r.
 	PARAMETER o IS obt.
 	PARAMETER want IS KA_TRUE.
 	SET o TO orb_from_orbit(o).
+	IF r < (o["pe"]) RETURN 0.
+	IF r > (o["ap"]) AND o["ecc"]<=1 RETURN 180.
 	
-	IF r < (o["pe"]) OR r > (o["ap"]) {
-		PRINT "*** WARNING: attempted to find true anomaly where pe <= radius <= ap is false.".
-		RETURN.
-	}
 	LOCAL v IS ((((o["sma"]*(1-o["ecc"]^2))/r) - 1)/o["ecc"]).
-	RETURN orb_convert_anomaly(ACOSE(v), o["ecc"], KA_TRUE, want).
+	RETURN orb_convert_anomaly(ACOSL(v), o["ecc"], KA_TRUE, want).
 }
 
 FUNCTION orb_radius_for_anomaly {
@@ -269,6 +341,7 @@ FUNCTION orb_radius_for_anomaly {
 
 // Returns the next time a particular anomaly value will be reached.
 // (Hint: Time to periapsis = orb_next_anomaly(0,...); time to apoapsis = orb_next_anomaly(180,...).
+// **NOTE: Hyperbolic orbits will only visit each anomaly once.  This returns that visit time, which may be in the past.**
 FUNCTION orb_next_anomaly {
 	PARAMETER m.  // Anomaly value.
 	PARAMETER o IS obt.
@@ -276,14 +349,18 @@ FUNCTION orb_next_anomaly {
 	PARAMETER have IS KA_TRUE.
 	SET o TO orb_from_orbit(o).
 	SET m TO orb_convert_anomaly(m, o["ecc"], have, KA_MEAN).
+	IF IsFalse(m) { RETURN false. }
 	SET t TO ToSeconds(t).
-	
-	LOCAL adelta IS Clamp360(m-o["mna"])/360*o["period"].  // Fractional time required to get from current MNA to target.
-	LOCAL orbits IS FLOOR((t-o["epoch"]:seconds)/o["period"]).  // Number of whole orbits required to get to current time from epoch time.
-	LOCAL result IS o["epoch"] + (orbits*o["period"]) + adelta.
-	IF result<t { RETURN ToTime(result+o["period"]). }
-	RETURN ToTime(result).
+	// Figure out where MNA is "now".
+	LOCAL mnow IS o["mna"] + (ToSeconds(t)-ToSeconds(o["epoch"]))/o["arate"].
+	IF o["ecc"]<=1 {
+		SET m TO Clamp360(m).
+		SET mnow TO Clamp360(mnow).
+		IF m<mnow { SET m TO 360+m. }
+	}
+	RETURN t + (m-mnow)*o["arate"].
 }
+
 FUNCTION orb_prev_anomaly {
 	PARAMETER m.  // Anomaly value.
 	PARAMETER o IS obt.
@@ -303,7 +380,7 @@ FUNCTION orb_predict {
 		SET n TO node_to_vector(n).
 	}
 	LOCAL o IS orb_at_time(o,t).
-	RETURN orb_from_vectors(o["r"], o["v"] + basis_transform(basis_mvr(), n, True), o["body"], t).
+	RETURN orb_from_vectors(o["r"], o["v"] + basis_transform(basis_mvr(o), n, True), o["body"], t).
 }
 
 // Returns latitude at a particular anomaly value.
@@ -315,7 +392,7 @@ FUNCTION orb_latitude_for_anomaly {
 	PARAMETER have IS KA_TRUE.
 	SET o TO orb_from_orbit(o).
 	SET m TO orb_convert_anomaly(m, o["ecc"], have, KA_TRUE).
-	RETURN ASINE(SIN(m+o["argp"]) * COS(90-o["inc"])).
+	RETURN ASINL(SIN(m+o["argp"]) * SIN(o["inc"])).
 }
 
 // Returns expected anomaly value for a particular latitude.
@@ -326,7 +403,7 @@ FUNCTION orb_anomaly_at_latitude {
 	PARAMETER alt IS FALSE.  // Return other alternate anomaly value.
 	SET o TO orb_from_orbit(o).
 	IF alt {
-		RETURN orb_convert_anomaly(-ASINE(SIN(lat)/COS(90-o["inc"])) + 180 - o["argp"], o["ecc"], KA_TRUE, want).
+		RETURN orb_convert_anomaly(-ASINL(SIN(lat)/COS(90-o["inc"])) + 180 - o["argp"], o["ecc"], KA_TRUE, want).
 	}
-	RETURN orb_convert_anomaly(ASINE(SIN(lat)/COS(90-o["inc"])) - o["argp"], o["ecc"], KA_TRUE, want).
+	RETURN orb_convert_anomaly(ASINL(SIN(lat)/COS(90-o["inc"])) - o["argp"], o["ecc"], KA_TRUE, want).
 }

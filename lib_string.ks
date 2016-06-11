@@ -158,6 +158,8 @@ FUNCTION str_force_e {
 // x,y,z,m: Assuming the field is a vector, reference the corresponding axis value (or magnitude in the case of 'm'.  If any additional characters remain in the conversion string, they are applied to the resulting value.
 // p,y,r: Assuming the field is a rotation, reference the correspinding yaw, pitch, or roll value,  Note that quaternions are rotations.
 // s: Convert to string representation.
+// t: Convert int or timespan to absolute time representation (i.e. a date+time)
+// d: Convert int or timespan to relative time representation (i.e. days/hours from now)
 //
 // format_spec:
 // For vectors and rotations, the format is applied to each component rather than the vector as a whole.
@@ -171,7 +173,7 @@ FUNCTION str_force_e {
 // 
 // fill: If set, this is the character used for any padding.  If omitted, it is equivalent to space.
 // align: < is left aligned, > is right aligned, = forces the padding to be placed after the sign (if any) but before any digits, "^" forces the field to be centered.
-// sign: "-" uses a sign only on negative numbers.  "+" always use a sign.  " " use a leading space on positive numbers.
+// sign: "-" uses a sign only on negative numbers (default).  "+" always use a sign.  " " use a leading space on positive numbers.
 // width: Minimum field width for this value.  If this contains a leading 0, leading zeroes are added as padding as needed and align is set to =.  Width of 0 is the same as not specifying it at all.
 // precision: For numeric types including vectors and rotations: number of digits to show after the decimal point.  For other types, this is a maximum field with (excess characters will be cut from the right of the string).
 // If precision contains a leading minus sign, trailing zeros are replaced with spaces instead.  (Giving the illusion of aligning to decimal points.)
@@ -208,6 +210,31 @@ FUNCTION str_force_e {
 				IF c="p" { SET v TO v:pitch. }
 				ELSE IF c="y" { SET v TO v:yaw. }
 				ELSE IF c="r" { SET v TO v:roll. }
+			} ELSE IF (v:IsType("Scalar") OR v:IsType("Timespan")) AND (c="d" OR c="t") {
+				LOCAL dpy IS IIF(kuniverse:hoursperday=6,425,365).  // Here's to hoping KSP doesn't model leap years and we guessed correctly.
+				LOCAL spd IS 3600*(kuniverse:hoursperday).
+				LOCAL t IS ToSeconds(v).
+				LOCAL sign IS IIF(t<0,"-", " ").
+				SET t TO ABS(t).
+				LOCAL s IS MOD(t, 60).
+				IF c="d" {
+					SET s TO FLOOR(s*100)*0.01.  // Round would be nicer, but might break terribly.
+				} ELSE {
+					SET s TO FLOOR(s).
+				}
+				LOCAL args IS LIST(
+					FLOOR(t/(spd*dpy)) + IIF(c="t",1,0),
+					FLOOR(MOD(t/spd, dpy)),
+					FLOOR(MOD(t/3600, kuniverse:hoursperday)),
+					FLOOR(MOD(t/60, 60)),
+					s,
+					sign
+				).
+				LOCAL ix IS 3.
+				IF c="t" { SET ix TO 0. } // Abs time.
+				ELSE IF args[0]>0 { SET ix TO 1. }
+				ELSE IF args[1]>0 { SET ix TO 2. }
+				RETURN _datefmts[ix](args).
 			}
 		}
 		RETURN fn(v).
@@ -303,7 +330,10 @@ FUNCTION str_force_e {
 				SET v TO v:remove(0,1).
 			} ELSE IF s="+" AND v="0" {
 				SET sign TO " ".
+			} ELSE IF s="-" {
+				SET sign TO "".
 			}
+				
 			IF p>0 {
 				// At 0 precision, we're rounded to an integer anyways.
 				// At -1 precision, we don't care about decimal alignment.
@@ -353,7 +383,7 @@ FUNCTION str_force_e {
 			LOCAL fslen IS fspec:length.
 			LOCAL fill IS "".  // If this is still empty at the end, we default it.
 			LOCAL align IS "a".
-			LOCAL sign IS " ".
+			LOCAL sign IS "-".
 			LOCAL tz IS true.
 			IF fslen>1 AND "<>=^":contains(fspec[1]) {
 				SET align TO fspec[1].
@@ -491,4 +521,11 @@ FUNCTION str_force_e {
 	GLOBAL str_format IS _format@.
 	GLOBAL str_formatter IS _formatter@.
 	GLOBAL str_format_compile IS _compile@.
+
+	LOCAL _datefmts IS LIST(
+		str_formatter("Year {0}, day {1:03} {2:02}:{3:02}:{4:02}"),
+		str_formatter("{5}{0}y,{1:03}d,{2:02}:{3:02}:{4:05.2}"),
+		str_formatter("{5}{1}d,{2:02}:{3:02}:{4:05.2}"),
+		str_formatter("{5}{2}:{3:02}:{4:05.2}")
+	).
 }

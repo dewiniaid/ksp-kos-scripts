@@ -1,6 +1,7 @@
 @LAZYGLOBAL OFF.
 // Utility functions and constants.
-GLOBAL K_PI IS constant():pi.  // Shorter!
+GLOBAL K_PI IS constant:pi.  // Shorter!
+GLOBAL K_E IS constant:e.  // Shorter!
 // Divide to convert degrees to radians, multiply to convert radians to degrees.
 GLOBAL K_DEGREES IS 180/K_PI.
 
@@ -17,27 +18,39 @@ GLOBAL KA_TRUE IS 2.
 // Return t if c else f.
 FUNCTION IIF { PARAMETER c. PARAMETER t. PARAMETER f. IF c { RETURN t. } RETURN f. }
 
+// Version of Mod that always returns between [0,m) rather than (-m,m).
+FUNCTION Mod2 { PARAMETER v. PARAMETER m. SET v TO MOD(v,m). RETURN IIF(v<0,v+m,v). }
+
 // Clamp angles to 0..360 or -180 to 180.  Requires v >= -360.
-FUNCTION Clamp360 { PARAMETER v. RETURN MOD(v+360,360). }
-FUNCTION Clamp180 { PARAMETER v. RETURN MOD(v+540,360)-180. }
+FUNCTION Clamp360 { PARAMETER v. RETURN MOD2(v,360). }
+FUNCTION Clamp180 { PARAMETER v. RETURN MOD2(v+180,360)-180. }
+
+// Returns b if between a..c, otherwise a or c.  Equivalent to MIN(MAX(a,b),c).
+FUNCTION Limit { PARAMETER a. PARAMETER b. PARAMETER c. RETURN MIN(MAX(a,b),c). }
 
 // Adds two-argument versions of arccos/arcsin that return negative values when needed.
 {
+	// Implements asin/acos and limiting versions.
 	LOCAL FUNCTION fn {
 		PARAMETER f.
-		PARAMETER e.  // True: Coerce 1+epsilon to 1 and -1+epsilon to -1.
+		PARAMETER l.  // True: Force values to -1..1
 		PARAMETER x.
 		PARAMETER y IS 0.
-		IF e AND x>1 AND x-K_EPSILON<=1 { SET x TO 1. }
-		IF e AND x<-1 AND x+K_EPSILON>=-1 { SET x TO -1. }
+		IF l { SET x TO Limit(-1,x,1). }
 		IF y >= 0 { RETURN f(x). }
 		RETURN 360-f(x).
 	}
+	// Wrap a function that expects/returns radians to return degrees.
+	LOCAL FUNCTION rw { PARAMETER f. PARAMETER x. RETURN f(x/K_DEGREES)*K_DEGREES. }
 	GLOBAL ASIN IS fn@:bind(arcsin@, false).
 	GLOBAL ACOS IS fn@:bind(arccos@, false).
-	GLOBAL ASINE IS fn@:bind(arcsin@, true).
-	GLOBAL ACOSE IS fn@:bind(arccos@, true).
+	GLOBAL ASINL IS fn@:bind(arcsin@, true).
+	GLOBAL ACOSL IS fn@:bind(arccos@, true).
 }
+FUNCTION SINH { PARAMETER x. SET x TO x/K_DEGREES. RETURN (K_E^x - K_E^(-x))/2. }
+FUNCTION COSH { PARAMETER x. SET x TO x/K_DEGREES. RETURN (K_E^x + K_E^(-x))/2. }
+FUNCTION ASINH { PARAMETER x. PARAMETER y IS 0. RETURN IIF(y<0,-1,1)*K_DEGREES*LN(x+SQRT(x^2+1)). }
+FUNCTION ACOSH { PARAMETER x. PARAMETER y IS 0. RETURN IIF(y<0,-1,1)*K_DEGREES*LN(x+SQRT(x^2-1)). }
 
 // kOS doesn't have any good methods for constructing our own timespan.  Fakery.
 GLOBAL K_EPOCH IS TIME-TIME.
@@ -79,3 +92,16 @@ FUNCTION LEX_UPDATE {
 	}
 	RETURN dst.
 }
+
+// Flattens a list of lists into a list.
+FUNCTION Flatten {
+	PARAMETER lists.
+	LOCAL r IS LIST().
+	FOR sub IN lists { FOR item IN sub { r:add(item). } }
+	RETURN r.
+}
+
+// Type-safe comparison
+FUNCTION IsTrue  { PARAMETER v. RETURN v:IsType("Boolean") AND v. }
+FUNCTION IsFalse { PARAMETER v. RETURN v:IsType("Boolean") AND NOT v. }
+	
