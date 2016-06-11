@@ -13,10 +13,8 @@ RUN ONCE lib_string.
 FUNCTION plan_tdv {
 	PARAMETER plan.
 	LOCAL dv IS 0.
-	IF plan:length=0 { RETURN 0. }
-	IF plan[0]:istype("Vector") { RETURN plan[0]:mag. }
-	FOR m IN plan {
-		SET dv TO dv+m[0]:mag.
+	FOR ix IN RANGE(0,plan:length,2) {
+		SET dv TO dv+plan[ix]:mag.
 	}
 	RETURN dv.
 }
@@ -27,7 +25,7 @@ FUNCTION plan_choose {
 	PARAMETER p1.
 	PARAMETER p2 IS 0.
 	
-	IF p1[0]:istype("List") AND p1[0][0]:istype("List") {
+	IF p1[0]:istype("List") {
 		LOCAL best_plan IS LIST().
 		LOCAL best_dv IS 0.
 		FOR p IN p1 {
@@ -36,18 +34,19 @@ FUNCTION plan_choose {
 		}
 		RETURN best_plan.
 	}
+	
 	RETURN IIF(plan_tdv(p1) < plan_tdv(p2), p1, p2).
 }
 
 FUNCTION plan_add {
 	PARAMETER plan.
-	IF plan:length=0 { RETURN. }
-	IF plan[0]:istype("Vector") { RETURN plan_add(LIST(plan)). }
-	
-	FOR m IN plan {
-		ADD vector_to_node(m[0], ToSeconds(m[1])).
+	FOR ix IN RANGE(0,plan:length,2) {
+		ADD vector_to_node(plan[ix], ToSeconds(plan[ix+1])).
 	}
-}	
+}
+
+FUNCTION plan_mintime { PARAMETER p. RETURN p[1]. }
+FUNCTION plan_maxtime { PARAMETER p. RETURN p[p:length-1]. }
 
 // Change semimajor axis at time.
 FUNCTION mvr_change_sma {
@@ -118,16 +117,25 @@ FUNCTION mvr_inclination_ex {
 	PARAMETER t.  // Earliest maneuver time.
 	PARAMETER inc. // Target inclination.
 	PARAMETER o IS ship.  // Any orbital, Orbit or Orb.
+	PARAMETER raisealt IS TRUE.
+	
 	LOCAL o IS orb_from_orbit(o).
-	LOCAL tnode IS orb_next_anomaly(IIF(o["argp"]<90 OR o["argp"]>270,0,180)-o["argp"],o,t,KA_TRUE).
-	LOCAL plan IS LIST(mvr_inclination(tnode,inc,o)).
-	LOCAL fmt IS str_formatter("{:20}: dV={6.1ms} @ t={}").
+	LOCAL anode IS IIF(o["argp"]<90 OR o["argp"]>270,0,180)-o["argp"].
+	LOCAL tnode IS orb_next_anomaly(anode,o,t,KA_TRUE).
+	LOCAL plan IS mvr_inclination(tnode,inc,o).
+	LOCAL can IS 0.
+	LOCAL fmt IS str_formatter("{:20}: dV={:6.1}m/s").
+	//PRINT fmt(LIST("LAN/DN", plan_tdv(plan))).
+	LOCAL thigh IS 0.
+	LOCAL ahigh IS -1.
+	LOCAL ans IS -1.
+	
 	
 	IF inc<>0 {
-		LOCAL thigh IS ToSeconds(orb_next_anomaly(180,o,t,KA_TRUE)).
-		LOCAL tlow IS ToSeconds(tnode).
+		SET ahigh TO 180.
+		SET thigh TO ToSeconds(orb_next_anomaly(ahigh,o,t,KA_TRUE)).
 		LOCAL sininc IS ABS(SIN(inc)).
-		IF ABS(SIN(orb_latitude_for_anomaly(180,o))) > sininc {
+		IF ABS(SIN(orb_latitude_for_anomaly(ahigh,o))) > sininc {
 			// AP is too high of latitude.  Figure out the anomaly of the nearest location at correct latitude.
 			// at 0<=argp<180, pe is in the north, thus ap is in the south (negative latitudes).
 			LOCAL lat IS IIF(0 <= o["argp"] AND o["argp"] < 180, -inc, inc).
@@ -135,17 +143,46 @@ FUNCTION mvr_inclination_ex {
 			LOCAL m2 IS orb_anomaly_at_latitude(lat,o,KA_TRUE,true).
 			
 			// Find time to the higher value.
-			SET thigh TO orb_next_anomaly(IIF(ABS(m1-180)<ABS(m2-180),m1,m2),o,t,KA_TRUE).
+			SET ahigh TO IIF(ABS(m1-180)<ABS(m2-180),m1,m2).
+			SET thigh TO orb_next_anomaly(ahigh,o,t,KA_TRUE).
 		}
-		SET plan TO plan_choose(plan, LIST(mvr_inclination(thigh,inc,o))).
+		SET can TO mvr_inclination(thigh,inc,o).
+		SET plan TO plan_choose(plan, can).
+		//PRINT fmt(LIST("High", plan_tdv(can))).
 		IF ABS(SIN(o["inc"])) < sininc {
-			IF 0 > Clamp360(o["argp"]) AND Clamp360(o["argp"]) >= 180 {
-				SET plan TO plan_choose(plan, LIST(mvr_inclination(orb_next_anomaly(90-o["argp"],o,t,KA_TRUE),inc,o))).
-			} ELSE {
-				SET plan TO plan_choose(plan, LIST(mvr_inclination(orb_next_anomaly(270-o["argp"],o,t,KA_TRUE),inc,o))).
+			SET ans TO Clamp360(IIF(0 > Clamp360(o["argp"]) AND Clamp360(o["argp"]) >= 180,90,270)-o["argp"]).
+			SET can TO mvr_inclination(orb_next_anomaly(ans,o,t,KA_TRUE),inc,o).
+			//PRINT fmt(LIST("North/South", plan_tdv(can))).
+			SET plan TO plan_choose(plan, can).
+		}
+	}
+	IF NOT raisealt { RETURN plan. }
+	LOCAL times IS LIST(orb_next_anomaly(0,o,t), orb_next_anomaly(180+anode,o,t)).
+	IF ahigh<>-1 AND ahigh<>180 { times:ADD(orb_next_anomaly(180+ahigh,o,t)). }
+	IF ans<>-1 { times:ADD(orb_next_anomaly(180+ans,o,t)). }
+
+	LOCAL bestdv IS plan_tdv(plan).
+	LOCAL tdv IS bestdv.
+	FOR i IN RANGE(1,6) {
+		LOCAL dv IS tdv*0.1*i.
+		LOCAL mvr IS V(0,0,dv).
+		PRINT "Testing effects of adding " + dv + " dV...".
+		FOR tprime IN times {
+			LOCAL oprime IS orb_predict(o, mvr, tprime).
+			IF oprime["ecc"]<1 { 
+				LOCAL can IS mvr_inclination_ex(tprime, inc, oprime, FALSE).
+				LOCAL candv IS plan_tdv(can)+2*dv.
+				PRINT candv.
+				IF candv < bestdv {
+					SET plan TO Flatten(LIST(LIST(mvr, tprime), can, LIST(-mvr, orb_next_anomaly(oprime["trueanomaly"],plan_maxtime(can))))).
+					SET bestdv TO candv.
+				}
 			}
 		}
 	}
 	RETURN plan.
 }
-// plan_add(mvr_inclination_ex(time, 15)).
+
+LOCAL p IS (mvr_inclination_ex(time, 90)).
+PRINT p.
+PLAN_ADD(p).
