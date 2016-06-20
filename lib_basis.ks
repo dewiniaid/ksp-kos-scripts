@@ -87,9 +87,33 @@ FUNCTION node_to_vector {
 	RETURN V(n:radialout, n:normal, n:prograde).
 }
 
-// Converts a radial/normal/prograde vector to a node.
+// Converts a radial/normal/prograde vector to a node.  Can reconfigure an existing node.
 FUNCTION vector_to_node {
 	PARAMETER v.
 	PARAMETER t IS TIME.
-	RETURN NODE(t,v:x,v:y,v:z).
+	PARAMETER n IS FALSE.
+	IF IsFalse(n) { RETURN NODE(ToSeconds(t),v:x,v:y,v:z). }
+	RETURN node_update(n,t,v:x,v:y,v:z). 
+}
+
+// Updates an existing node in-place.
+FUNCTION node_update {
+	PARAMETER nd. PARAMETER t. PARAMETER r. PARAMETER n. PARAMETER p.
+	SET nd:eta TO ToSeconds(t)-ToSeconds(TIME).
+	SET nd:radialout TO r.
+	SET nd:normal TO n.
+	SET nd:prograde TO p.
+	RETURN nd.
+}
+
+// Copy a node.
+FUNCTION node_copy {
+	PARAMETER src.
+	PARAMETER dst IS FALSE.
+	IF IsFalse(dst) { RETURN NODE(src:eta+TIME:Seconds, src:radialout, src:normal, src:prograde). }
+	SET dst:eta TO src:eta.
+	SET dst:radialout TO src:radialout.
+	SET dst:normal TO src:normal.
+	SET dst:prograde TO src:prograde.
+	RETURN dst.
 }
