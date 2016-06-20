@@ -14,6 +14,7 @@ GLOBAL K_M IS 1. GLOBAL K_KM IS K_M*1000. GLOBAL K_MM IS K_KM*1000. GLOBAL K_GM 
 GLOBAL KA_MEAN IS 0.
 GLOBAL KA_ECC IS 1. GLOBAL KA_ECCENTRIC IS KA_ECC.
 GLOBAL KA_TRUE IS 2.
+GLOBAL KA_MAX IS KA_TRUE.
 
 // Return t if c else f.
 FUNCTION IIF { PARAMETER c. PARAMETER t. PARAMETER f. IF c { RETURN t. } RETURN f. }
@@ -27,6 +28,8 @@ FUNCTION Clamp180 { PARAMETER v. RETURN MOD2(v+180,360)-180. }
 
 // Returns b if between a..c, otherwise a or c.  Equivalent to MIN(MAX(a,b),c).
 FUNCTION Limit { PARAMETER a. PARAMETER b. PARAMETER c. RETURN MIN(MAX(a,b),c). }
+// Returns TRUE if a<=b<=c.
+FUNCTION Between { PARAMETER a. PARAMETER b. PARAMETER c. RETURN a<=b AND b<=c. }
 
 // Adds two-argument versions of arccos/arcsin that return negative values when needed.
 {
@@ -63,7 +66,8 @@ FUNCTION ToSeconds { PARAMETER t. IF t:IsType("Timespan") { RETURN t:seconds. } 
 // Orbit or orbitable.
 FUNCTION RELPOSITION { PARAMETER s. RETURN s:position - s:body:position. }
 // Orbitable only.
-FUNCTION RELPOSITIONAT { PARAMETER s. PARAMETER t. RETURN POSITIONAT(s,t)-POSITIONAT(ORBITAT(s,t):body,t). }
+// Note: The lack of a second positionat() covering the body is intentional, and has to deal with how kOS does reference frames.
+FUNCTION RELPOSITIONAT { PARAMETER s. PARAMETER t. RETURN POSITIONAT(s,t)-ORBITAT(s,t):body:position. }
 
 // Equivalent to A + angleaxis(b, theta), but more accurate.
 FUNCTION AngleAxis2 {
@@ -100,6 +104,9 @@ FUNCTION Flatten {
 	FOR sub IN lists { FOR item IN sub { r:add(item). } }
 	RETURN r.
 }
+
+// Extend a using elements from b
+FUNCTION Extend { PARAMETER a. PARAMETER b. FOR item IN b { a:add(item). } }
 
 // Type-safe comparison
 FUNCTION IsTrue  { PARAMETER v. RETURN v:IsType("Boolean") AND v. }
