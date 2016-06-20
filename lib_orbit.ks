@@ -84,10 +84,13 @@ FUNCTION orb_from_orbit {
 // Returns FALSE on a failed conversion.  (Use IsFalse() to check return values, since 0 is also a valid return).
 FUNCTION orb_convert_anomaly {
 	PARAMETER m.   // Input anomaly
-	PARAMETER e.   // Input eccentricity.
+	PARAMETER e.   // Input eccentricity -- or an orbit lexicon.
 	PARAMETER have IS KA_MEAN.  // Anomaly type of input.
 	PARAMETER want IS KA_ECC.   // Anomaly type of output.
 	IF have=want { RETURN m. }  // No conversion needed.
+	IF e:IsType("Lexicon") { SET e TO e["ecc"]. }
+	ELSE IF e:IsType("Orbitable") { SET e TO e:obt:eccentricity. }
+	ELSE IF e:IsType("Orbit") { SET e TO e:eccentricity. }
 
 	IF e<=1 {
 		SET m TO Clamp360(m).
@@ -205,10 +208,10 @@ FUNCTION orb_update {
 		SET o["slr"] TO o["smna"]^2/o["sma"].
 	}
 	IF what:contains("e") {  // Eccentric anomaly
-		SET o["eccanomaly"] TO orb_convert_anomaly(o["mna"], o["ecc"]).
+		SET o["eccanomaly"] TO orb_convert_anomaly(o["mna"], o).
 	}
 	IF what:contains("t") {  // True anomaly.
-		SET o["trueanomaly"] TO orb_convert_anomaly(o["eccanomaly"], o["ecc"], KA_ECC, KA_TRUE).
+		SET o["trueanomaly"] TO orb_convert_anomaly(o["eccanomaly"], o, KA_ECC, KA_TRUE).
 		// IF o["eccanomaly"]>180 { SET o["trueanomaly"] TO 360-o["trueanomaly"]. }
 	}
 	IF what:contains("r") {  // Position vector.
@@ -333,17 +336,24 @@ FUNCTION orb_anomaly_at_radius {
 	IF r < (o["pe"]) RETURN 0.
 	IF r > (o["ap"]) AND o["ecc"]<=1 RETURN 180.
 	
-	LOCAL v IS ((((o["sma"]*(1-o["ecc"]^2))/r) - 1)/o["ecc"]).
-	RETURN orb_convert_anomaly(ACOSL(v), o["ecc"], KA_TRUE, want).
+	LOCAL v IS ((o["sma"]*(1-o["ecc"]^2))/r - 1)/o["ecc"].
+	RETURN orb_convert_anomaly(ACOSL(v), o, KA_TRUE, want).
 }
 
-FUNCTION orb_radius_for_anomaly {
+FUNCTION orb_radius_at_anomaly {
 	PARAMETER m.  // Anomaly value.
 	PARAMETER o IS obt.
 	PARAMETER have IS KA_TRUE.  // Anomaly type
 	SET o TO orb_from_orbit(o).
 	RETURN o["sma"]*(1-o["ecc"]^2)/(1+o["ecc"]*COS(orb_convert_anomaly(m,o,have,KA_TRUE))).
 }
+
+FUNCTION orb_radius_at_time {
+	PARAMETER t IS TIME.  // Time must be greater than this value.
+	PARAMETER o IS obt.
+	RETURN orb_radius_at_anomaly(orb_anomaly_at_time(t,o),o).
+}
+
 
 // Returns the next time a particular anomaly value will be reached.
 // (Hint: Time to periapsis = orb_next_anomaly(0,...); time to apoapsis = orb_next_anomaly(180,...).
@@ -376,6 +386,17 @@ FUNCTION orb_prev_anomaly {
 	RETURN orb_next_anomaly(m,o,t-o["period"],have).
 }
 
+FUNCTION orb_anomaly_at_time {
+	PARAMETER t IS TIME.  // Time must be greater than this value.
+	PARAMETER o IS obt.
+	PARAMETER want IS KA_TRUE.
+	
+	// Figure out mean anomaly at time.
+	LOCAL m IS o["mna"] + (ToSeconds(t)-ToSeconds(o["epoch"]))/o["arate"].
+	IF o["ecc"]<=1 { SET m TO Clamp360(m). }
+	RETURN orb_convert_anomaly(m,o["ecc"]).
+}
+	
 // Returns a predicted orbit based on a maneuver node.
 FUNCTION orb_predict {
 	PARAMETER o.  // Orbit.
@@ -392,7 +413,7 @@ FUNCTION orb_predict {
 // Returns latitude at a particular anomaly value.
 // I derived this one myself!
 // sin(lat) = sin(true + argp) * cos(90 - inc)
-FUNCTION orb_latitude_for_anomaly {
+FUNCTION orb_latitude_at_anomaly {
 	PARAMETER m.  // Anomaly value.
 	PARAMETER o IS obt.
 	PARAMETER have IS KA_TRUE.
@@ -412,4 +433,16 @@ FUNCTION orb_anomaly_at_latitude {
 		RETURN orb_convert_anomaly(-ASINL(SIN(lat)/COS(90-o["inc"])) + 180 - o["argp"], o["ecc"], KA_TRUE, want).
 	}
 	RETURN orb_convert_anomaly(ASINL(SIN(lat)/COS(90-o["inc"])) - o["argp"], o["ecc"], KA_TRUE, want).
+}
+
+{
+	FUNCTION _wrap { 
+		PARAMETER fn.
+		PARAMETER t IS TIME.
+		PARAMETER o IS obt. 
+		SET o TO orb_from_orbit(o).
+		RETURN fn(orb_anomaly_at_time(t,o),o).
+	}
+	GLOBAL orb_latitude_at_time IS _wrap@:bind(orb_latitude_at_anomaly@).
+	GLOBAL orb_radius_at_time IS _wrap@:bind(orb_radius_at_anomaly@).
 }

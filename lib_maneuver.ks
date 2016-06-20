@@ -1,7 +1,7 @@
 @LAZYGLOBAL OFF.
 RUN ONCE lib_util.
 RUN ONCE lib_basis.
-RUN ONCE lib_orbit.
+RUN ONCE lib_obt.
 RUN ONCE lib_string.
 
 // A maneuver plan is a list of maneuvers in (translated) vector form,
@@ -47,6 +47,30 @@ FUNCTION plan_add {
 
 FUNCTION plan_mintime { PARAMETER p. RETURN p[1]. }
 FUNCTION plan_maxtime { PARAMETER p. RETURN p[p:length-1]. }
+
+FUNCTION plan_predict {
+	PARAMETER o.
+	PARAMETER p.
+	FOR ix IN RANGE(0,p:length,2) {
+		SET o TO orb_predict(o, p[ix], p[ix+1]).
+	}
+	RETURN o.
+}
+
+FUNCTION node_has_nextnode {
+	LOCAL sentinel IS NODE(TIME:Seconds+2^32,42,1337,359).
+	ADD sentinel.
+	LOCAL r IS NEXTNODE<>sentinel.
+	REMOVE sentinel.
+	RETURN r.
+}
+
+FUNCTION node_clear {
+	LOCAL sentinel IS NODE(TIME:Seconds+2^32,42,1337,359).
+	ADD sentinel.
+	UNTIL NEXTNODe=sentinel { REMOVE NEXTNODE. }
+	REMOVE sentinel.
+}
 
 // Change semimajor axis at time.
 FUNCTION mvr_change_sma {
@@ -135,7 +159,7 @@ FUNCTION mvr_inclination_ex {
 		SET ahigh TO 180.
 		SET thigh TO ToSeconds(orb_next_anomaly(ahigh,o,t,KA_TRUE)).
 		LOCAL sininc IS ABS(SIN(inc)).
-		IF ABS(SIN(orb_latitude_for_anomaly(ahigh,o))) > sininc {
+		IF ABS(SIN(orb_latitude_at_anomaly(ahigh,o))) > sininc {
 			// AP is too high of latitude.  Figure out the anomaly of the nearest location at correct latitude.
 			// at 0<=argp<180, pe is in the north, thus ap is in the south (negative latitudes).
 			LOCAL lat IS IIF(0 <= o["argp"] AND o["argp"] < 180, -inc, inc).
@@ -157,24 +181,32 @@ FUNCTION mvr_inclination_ex {
 		}
 	}
 	IF NOT raisealt { RETURN plan. }
-	LOCAL times IS LIST(orb_next_anomaly(0,o,t), orb_next_anomaly(180+anode,o,t)).
-	IF ahigh<>-1 AND ahigh<>180 { times:ADD(orb_next_anomaly(180+ahigh,o,t)). }
-	IF ans<>-1 { times:ADD(orb_next_anomaly(180+ans,o,t)). }
+	LOCAL orbits IS LIST(orb_at_anomaly(0,o,t), orb_at_anomaly(180+anode,o,t)).
+	IF ahigh<>-1 AND ahigh<>180 { orbits:ADD(orb_at_anomaly(180+ahigh,o,t)). }
+	IF ans<>-1 { orbits:ADD(orb_at_anomaly(180+ans,o,t)). }
 
 	LOCAL bestdv IS plan_tdv(plan).
 	LOCAL tdv IS bestdv.
 	FOR i IN RANGE(1,6) {
-		LOCAL dv IS tdv*0.1*i.
+		LOCAL dv IS ROUND(tdv*0.1*i,2).
 		LOCAL mvr IS V(0,0,dv).
+		PRINT " ".
 		PRINT "Testing effects of adding " + dv + " dV...".
-		FOR tprime IN times {
-			LOCAL oprime IS orb_predict(o, mvr, tprime).
-			IF oprime["ecc"]<1 { 
-				LOCAL can IS mvr_inclination_ex(tprime, inc, oprime, FALSE).
+		PRINT STR_FORMAT("Actual orbit: ap={:.2} pe={:.2}.", LIST(obt:apoapsis, obt:periapsis)).
+		FOR obase IN orbits {
+			LOCAL otime IS obase["epoch"].
+			PRINT STR_FORMAT("Orbit at {!d}: ap={:.2} pe={:.2}.", LIST(otime, obase["ap"]-obt:body:radius, obase["pe"]-obt:body:radius)).
+			LOCAL burnalt IS orb_radius_at_time(otime,obase).
+			PRINT "burn altitude is: " + burnalt.
+			LOCAL oprime IS orb_predict(obase, mvr, otime).
+			PRINT STR_FORMAT("Predicted: ap={:.2} pe={:.2}.", LIST(oprime["ap"]-obt:body:radius, oprime["pe"]-obt:body:radius)).
+			IF oprime["ecc"]<1 AND oprime["ap"] < oprime["body"]:soiradius {
+				LOCAL can IS mvr_inclination_ex(otime, inc, oprime, FALSE).
 				LOCAL candv IS plan_tdv(can)+2*dv.
-				PRINT candv.
 				IF candv < bestdv {
-					SET plan TO Flatten(LIST(LIST(mvr, tprime), can, LIST(-mvr, orb_next_anomaly(oprime["trueanomaly"],plan_maxtime(can))))).
+					SET oprime TO plan_predict(oprime, can).
+					LOCAL ta IS orb_anomaly_at_radius(burnalt, o).
+					SET plan TO Flatten(LIST(LIST(mvr, otime), can, LIST(-mvr, otime+oprime["period"]))).
 					SET bestdv TO candv.
 				}
 			}
@@ -185,4 +217,5 @@ FUNCTION mvr_inclination_ex {
 
 LOCAL p IS (mvr_inclination_ex(time, 90)).
 PRINT p.
+PRINT plan_tdv(p).
 PLAN_ADD(p).

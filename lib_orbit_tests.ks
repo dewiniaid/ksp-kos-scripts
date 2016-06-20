@@ -74,7 +74,7 @@ PRINT group_sep.
 		PARAMETER r.
 		PARAMETER m.
 		PARAMETER k IS KA_TRUE.
-		LOCAL testr IS orb_radius_for_anomaly(m,o,k).
+		LOCAL testr IS orb_radius_atanomaly(m,o,k).
 		LOCAL testm IS (orb_anomaly_at_radius(testr,o,KA_TRUE)).
 		PRINT IIF(r<>0,fmt_withradius@,fmt_noradius@)(LIST(desc, m, r, testr, r-testr, m, testm, 360-testm, m-testm, m-(360-testm),atype[k])).
 	}
@@ -95,7 +95,7 @@ PRINT group_sep.
 		PARAMETER lat.
 		PARAMETER m.
 		SET m TO (m).
-		LOCAL olat IS orb_latitude_for_anomaly(m,o,KA_TRUE).
+		LOCAL olat IS orb_latitude_atanomaly(m,o,KA_TRUE).
 		LOCAL m1 IS orb_anomaly_at_latitude(lat,o,KA_TRUE,false).
 		LOCAL m2 IS orb_anomaly_at_latitude(lat,o,KA_TRUE,true).
 		PRINT fmt_lat(LIST(desc, m, lat, olat, m1, m-m1, m2, m-m2)).
