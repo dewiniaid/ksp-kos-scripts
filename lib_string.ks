@@ -394,7 +394,7 @@ FUNCTION str_force_e {
 				SET ix TO 1.
 			}
 			IF ix<fslen AND "+- ":contains(fspec[ix]) {
-				SET align TO fspec[ix].
+				SET sign TO fspec[ix].
 				SET ix TO ix+1.
 			}
 			// Find width, precision, and options strings.
