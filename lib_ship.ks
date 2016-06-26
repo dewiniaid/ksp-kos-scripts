@@ -5,8 +5,8 @@ FUNCTION Ship_Lexicon {
 	PARAMETER includeSelf IS TRUE.	// FALSE = don't include ourself in the lexicon.
 	LOCAL v IS LIST().
 	LOCAL rv IS LEXICON().
-	LIST targets IN v.
-	IF includeSelf { targets:add(ship). }
+	LIST TARGETS IN v.
+	IF includeSelf { v:add(ship). }
 	FOR vessel IN v {
 		IF rv:haskey(vessel:name) {
 			rv[vessel:name]:add(vessel).
