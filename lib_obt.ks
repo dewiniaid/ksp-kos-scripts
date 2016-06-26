@@ -200,7 +200,7 @@ FUNCTION obt_earliest_anomaly {
 	PARAMETER o IS obt.
 	PARAMETER t IS TIME.  // Time must be greater than this value.
 	PARAMETER have IS KA_TRUE.
-	LOCAL mnow IS obt_anomaly_at_time(o, t, have).
+	LOCAL mnow IS obt_anomaly_at_time(t, o, have).
 	LOCAL m IS FALSE.
 	IF o:eccentricity<=1 {
 		FOR anom IN anoms {
@@ -234,7 +234,7 @@ FUNCTION obt_anomaly_at_time {
 	LOCAL mnow IS obt_convert_anomaly(o:trueanomaly, o, KA_TRUE, KA_MEAN).
 	LOCAL m IS mnow + 360*(ToSeconds(t)-ToSeconds(TIME))/o:period.
 	IF o:eccentricity<=1 { SET m TO Clamp360(m). }
-	RETURN obt_convert_anomaly(m,o).
+	RETURN obt_convert_anomaly(m,o,KA_MEAN, want).
 }
 	
 // Returns latitude at a particular anomaly value.
@@ -345,6 +345,24 @@ FUNCTION obt_next_latitude {
 	}
 	RETURN obt_next_anomalies(anoms).
 }
+
+// Synodic period between this orbit and either a target orbit or a set period.
+FUNCTION obt_synodic_period {
+	PARAMETER p1.
+	PARAMETER o IS obt.
+	
+	IF p1:IsType("Orbitable") {
+		SET p1 TO p1:obt:period.
+	} ELSE IF p1:IsType("Orbit") {
+		SET p1 TO p1:period.
+	} ELSE {
+		SET p1 TO ToSeconds(other).
+	}
+	LOCAL p2 IS obt_of(o):period.
+	
+	RETURN 1/(1/MIN(p1,p2) - 1/MAX(p1,p2)).
+}
+	
 
 // Convenience functions
 {
