@@ -58,9 +58,11 @@ compile | bool | Whether `kinstall` should try compiling your code to see if it 
 minify | bool | Attempts to reduce source code size.  If `false`, none of the Minify options are processed.
 
 ### Minify options
+
 For numeric options, a value of -1 is equal to whatever the current maximum value is.
 
 Name | Type | Description
+---- | ---- | -----------
 comments | bool | Requires minify.  If `true`, strip comments from code.
 lines | int | How to handle linebreaks.   Note that options other than 0 will cause kOS to claim the wrong line of code if an error occurs.
  | | 0: Do nothing.
