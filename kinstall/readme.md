@@ -27,7 +27,7 @@ File: `kinstall.ks`
 `kinstall(FILE, DEST, SOURCE, CFG)`
 
 parameter | default | meaning
---------- | -------
+--------- | ------- | -------
 `FILE` | *required* | The filename to install.
 `DEST` | `core:volume` | The destination volume.
 `SOURCE` | `archive` | The source volume (which should contain FILE).  Will also be used for temporary files if the configuration doesn't specify otherwise.
