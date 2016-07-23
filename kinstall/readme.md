@@ -44,6 +44,7 @@ File: `lib_kinstall.ks`
 `lib_kinstall.ks` contains a lexicon entitled KINSTALL_CONFIG, which specifies most of the default configuration options used by the kinstall functions:
 
 ### General options.
+
 Name | Type | Description
 ---- | ---- | -----------
 recurse | bool | **Always enabled in this build** Whether `kinstall` should look through additional scripts.  The current build always looks through additional scripts.
